@@ -19,6 +19,7 @@ public class NetworkService {
     private Socket socket;
     private PrintWriter out;
     private BufferedReader in;
+    private String username;
 
     // Properties for data binding with UI
     private final ObservableList<String> onlineUsers = FXCollections.observableArrayList();
@@ -54,6 +55,7 @@ public class NetworkService {
             String response = in.readLine();
 
             if (response != null && response.startsWith("AUTH_SUCCESS")) {
+                this.username = user;
                 startListening();
                 return true;
             } else {
@@ -93,13 +95,13 @@ public class NetworkService {
     }
 
     private void parseServerMessage(String message) {
-        String[] parts = message.split("::", 2); // Tách lệnh và phần còn lại
+        String[] parts = message.split("::", 2);
         String command = parts[0];
 
         switch (command) {
             case "UPDATE_USERS":
-                if (parts.length > 1) {
-                    onlineUsers.clear();
+                onlineUsers.clear();
+                if (parts.length > 1 && !parts[1].isEmpty()) {
                     onlineUsers.addAll(parts[1].split(","));
                 }
                 break;
@@ -135,6 +137,10 @@ public class NetworkService {
         if (out != null) {
             out.println(message);
         }
+    }
+
+    public String getUsername() {
+        return username;
     }
 
     // Getters for JavaFX properties

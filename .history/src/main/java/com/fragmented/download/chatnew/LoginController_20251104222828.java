@@ -30,7 +30,7 @@ public class LoginController {
 
     @FXML
     public void initialize() {
-        ipField.setText("192.168.56.1");
+        ipField.setText("127.0.0.1");
         portField.setText("8080");
         errorLabel.setVisible(false);
     }

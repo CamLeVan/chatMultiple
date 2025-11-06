@@ -48,24 +48,27 @@ public class ClientHandler implements Runnable {
     }
 
     private void handleMessage(String message) {
-        String[] parts = message.split("::", 3); // Split into command, target, and content
+        String[] parts = message.split("::", 2);
         String command = parts[0];
 
-        // User must be authenticated for most commands
-        if (this.username == null && !command.equals("AUTH")) {
+        if (command.equals("AUTH")) {
+            String[] authParts = message.split("::", 4);
+            if (authParts.length == 4) {
+                handleAuth(authParts);
+            } else {
+                sendMessage("ERROR::Invalid AUTH command format.");
+            }
+            return;
+        }
+
+        if (this.username == null) {
             sendMessage("ERROR::Authentication required.");
             return;
         }
 
+        parts = message.split("::", 3);
+
         switch (command) {
-            case "AUTH":
-                if (parts.length == 3) { // Should be AUTH::type::user::pass, so split by 4
-                    String[] authParts = message.split("::", 4);
-                    if(authParts.length == 4) handleAuth(authParts);
-                } else {
-                    sendMessage("ERROR::Invalid AUTH command format.");
-                }
-                break;
             case "BROADCAST":
                 if (parts.length == 3) {
                     server.broadcastMessage("MESSAGE::" + this.username + "::" + parts[2], this);
@@ -82,8 +85,8 @@ public class ClientHandler implements Runnable {
                 }
                 break;
             case "CREATE_GROUP":
-                if (parts.length == 2) {
-                    handleCreateGroup(parts[1]);
+                if (parts.length == 3) { // Expects CREATE_GROUP::groupName::members
+                    handleCreateGroup(parts[1], parts[2]);
                 }
                 break;
             case "INVITE_TO_GROUP":
@@ -102,7 +105,7 @@ public class ClientHandler implements Runnable {
                 }
                 break;
             default:
-                sendMessage("ERROR::Unknown command");
+                sendMessage("ERROR::Unknown command: " + command);
                 break;
         }
     }
@@ -121,7 +124,6 @@ public class ClientHandler implements Runnable {
         if (groupMembers != null && groupMembers.contains(this)) {
             String message = String.format("MULTICAST_MESSAGE::%s::%s::%s", groupName, this.username, content);
             for (ClientHandler member : groupMembers) {
-                // The client will handle displaying their own message
                 if (member != this) {
                     member.sendMessage(message);
                 }
@@ -131,13 +133,22 @@ public class ClientHandler implements Runnable {
         }
     }
 
-    private void handleCreateGroup(String groupName) {
-        // Use computeIfAbsent to atomically create the group and add the creator
+    private void handleCreateGroup(String groupName, String membersString) {
         List<ClientHandler> members = server.getChatGroups().computeIfAbsent(groupName, k -> new CopyOnWriteArrayList<>());
         if (!members.contains(this)) {
             members.add(this);
         }
-        server.broadcastGroupUpdate(groupName); // Update all members in the group
+
+        if (membersString != null && !membersString.isEmpty()) {
+            String[] invitees = membersString.split(",");
+            for (String inviteeName : invitees) {
+                ClientHandler invitee = server.getOnlineClients().get(inviteeName.trim());
+                if (invitee != null) {
+                    invitee.sendMessage("GROUP_INVITE::" + groupName + "::" + this.username);
+                }
+            }
+        }
+        server.broadcastGroupUpdate(groupName);
     }
 
     private void handleInviteToGroup(String groupName, String inviteeName) {
@@ -160,7 +171,7 @@ public class ClientHandler implements Runnable {
             if (!members.contains(this)) {
                 members.add(this);
             }
-            server.broadcastGroupUpdate(groupName); // Update all members
+            server.broadcastGroupUpdate(groupName);
         } else {
             sendMessage("ERROR::Group '" + groupName + "' does not exist.");
         }
@@ -170,9 +181,7 @@ public class ClientHandler implements Runnable {
         List<ClientHandler> members = server.getChatGroups().get(groupName);
         if (members != null) {
             members.remove(this);
-            // Notify remaining members
             server.broadcastGroupUpdate(groupName);
-            // Confirm leaving to the user
             sendMessage("LEAVE_SUCCESS::" + groupName);
         }
     }
@@ -188,25 +197,25 @@ public class ClientHandler implements Runnable {
                     sendMessage("AUTH_FAIL::User is already logged in.");
                 } else {
                     this.username = user;
-                    server.addOnlineClient(user, this);
                     sendMessage("AUTH_SUCCESS");
-                    // Send the user their current group list
+                    server.addOnlineClient(user, this);
                     server.updateUserGroupLists(this);
                 }
             } else {
                 sendMessage("AUTH_FAIL::Invalid username or password.");
             }
         } else if (authType.equals("dangky")) {
-            if (server.getUsers().containsKey(user)) {
+            if (server.getUsers().putIfAbsent(user, pass) != null) {
                 sendMessage("AUTH_FAIL::Username already exists.");
             } else {
-                server.getUsers().put(user, pass);
-                sendMessage("AUTH_SUCCESS::Registration successful. Please log in.");
+                this.username = user;
+                sendMessage("AUTH_SUCCESS");
+                server.addOnlineClient(user, this);
+                server.updateUserGroupLists(this);
             }
         }
     }
 
-    // Gửi tin nhắn đến client này
     public void sendMessage(String message) {
         writer.println(message);
     }
